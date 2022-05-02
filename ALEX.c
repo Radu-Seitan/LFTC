@@ -674,13 +674,13 @@ void showAtoms()
     }
 }
 
-int main(int argc, char const *argv[])
-{
-    readFile(argv[1]);
-    pCrtCh = inBuffer;
-    while (getNextToken() != END)
-    {
-    }
-    showAtoms();
-    return 0;
-}
+// int main(int argc, char const *argv[])
+// {
+//     readFile(argv[1]);
+//     pCrtCh = inBuffer;
+//     while (getNextToken() != END)
+//     {
+//     }
+//     showAtoms();
+//     return 0;
+// }

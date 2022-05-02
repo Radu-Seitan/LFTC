@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <stdbool.h>
-#include "AtomiLexicali.h"
+#include "ALEX.c"
 
 Token *iTk;
 Token *consumedTk;
@@ -44,6 +44,8 @@ bool consume(int code)
     {
         consumedTk = iTk;
         iTk = iTk->next;
+        printToken(code);
+        printf("\n");
         return true;
     }
     return false;
@@ -73,6 +75,7 @@ bool unit()
         return true;
     }
 
+    tkerr(iTk, "Syntax error\n");
     iTk = start;
     return false;
 }
@@ -102,9 +105,15 @@ bool structDef()
                     {
                         return true;
                     }
+                    else
+                        tkerr(iTk, "Missing ; after struct declaration\n");
                 }
+                else
+                    tkerr(iTk, "Missing } after struct body\n");
             }
         }
+        else
+            tkerr(iTk, "Missing struct name\n");
     }
 
     iTk = start;
@@ -127,7 +136,11 @@ bool varDef()
             {
                 return true;
             }
+            else
+                tkerr(iTk, "Missing ; after variable declaration\n");
         }
+        else
+            tkerr(iTk, "Missing variable name\n");
     }
 
     iTk = start;
@@ -158,7 +171,7 @@ bool typeBase()
             return true;
         }
         else
-            tkerr(iTk, "Struct type declaration error");
+            tkerr(iTk, "Missing struct name\n");
     }
 
     iTk = start;
@@ -179,6 +192,8 @@ bool arrayDecl()
         {
             return true;
         }
+        else
+            tkerr(iTk, "Missing ] after array declaration\n");
     }
 
     iTk = start;
@@ -205,6 +220,8 @@ bool fnDef()
                             if (fnParam())
                             {
                             }
+                            else
+                                tkerr(iTk, "Missing argument from the function header\n");
                         }
                         else
                             break;
@@ -216,9 +233,15 @@ bool fnDef()
                     {
                         return true;
                     }
+                    else
+                        tkerr(iTk, "Function has no body\n");
                 }
+                else
+                    tkerr(iTk, "Missing ) after the function arguments\n");
             }
         }
+        else
+            tkerr(iTk, "Missing function name\n");
     }
 
     iTk = start;
@@ -239,6 +262,8 @@ bool fnParam()
             }
             return true;
         }
+        else
+            tkerr(iTk, "Missing argument name\n");
     }
 
     iTk = start;
@@ -276,14 +301,24 @@ bool stm()
                         {
                             if (stm())
                             {
+                                return true;
                             }
+                            else
+                                tkerr(iTk, "The else instruction cannot have an empty body\n");
                         }
-
                         return true;
                     }
+                    else
+                        tkerr(iTk, "The if instruction must have a body\n");
                 }
+                else
+                    tkerr(iTk, "Missing ) after the if condition\n");
             }
+            else
+                tkerr(iTk, "Missing condition from the if instruction\n");
         }
+        else
+            tkerr(iTk, "Missing ( after the if instruction\n");
     }
 
     if (consume(WHILE))
@@ -298,9 +333,15 @@ bool stm()
                     {
                         return true;
                     }
+                    else
+                        tkerr(iTk, "The while instruction must have a body\n");
                 }
+                else
+                    tkerr(iTk, "Missing ) after the while condition\n");
             }
         }
+        else
+            tkerr(iTk, "Missing ( after the while instruction\n");
     }
 
     if (consume(FOR))
@@ -326,10 +367,20 @@ bool stm()
                         {
                             return true;
                         }
+                        else
+                            tkerr(iTk, "The for instruction must have a body\n");
                     }
+                    else
+                        tkerr(iTk, "Missing ) after the for condition\n");
                 }
+                else
+                    tkerr(iTk, "Missing second ; from the for condition\n");
             }
+            else
+                tkerr(iTk, "Missing second ; from the for condition\n");
         }
+        else
+            tkerr(iTk, "Missing ( after the for instruction\n");
     }
 
     if (consume(BREAK))
@@ -338,6 +389,8 @@ bool stm()
         {
             return true;
         }
+        else
+            tkerr(iTk, "Missing ; after the break instruction");
     }
 
     if (consume(RETURN))
@@ -349,11 +402,20 @@ bool stm()
         {
             return true;
         }
+        else
+            tkerr(iTk, "Missing ; after the return instruction");
     }
 
     if (expr())
     {
+        if (consume(SEMICOLON))
+        {
+            return true;
+        }
+        else
+            tkerr(iTk, "Missing ; after expression");
     }
+
     if (consume(SEMICOLON))
     {
         return true;
@@ -385,6 +447,8 @@ bool stmCompound()
         {
             return true;
         }
+        else
+            tkerr(iTk, "Missing } after body");
     }
 
     iTk = start;
@@ -418,9 +482,12 @@ bool exprAssign()
             {
                 return true;
             }
+            else
+                tkerr(iTk, "Invalid expression after = \n");
         }
     }
 
+    iTk = start;
     if (exprOr())
     {
         return true;
@@ -428,4 +495,577 @@ bool exprAssign()
 
     iTk = start;
     return false;
+}
+
+// exprOr: exprOr OR exprAnd | exprAnd
+// exprOr : exprAnd exprOrAux
+bool exprOr()
+{
+    Token *start = iTk;
+
+    if (exprAnd())
+    {
+        if (exprOrAux())
+        {
+            return true;
+        }
+        else
+            tkerr(iTk, "Invalid expression after && \n");
+    }
+
+    iTk = start;
+    return false;
+}
+
+// exprOrAux : OR exprAnd exprOrAux | epsilon
+bool exprOrAux()
+{
+    Token *start = iTk;
+
+    if (consume(OR))
+    {
+        if (exprAnd())
+        {
+            if (exprOrAux())
+            {
+                return true;
+            }
+            else
+                tkerr(iTk, "Invalid expression after && \n");
+        }
+        else
+            tkerr(iTk, "Invalid expression after || \n");
+    }
+
+    iTk = start;
+    return true;
+}
+
+// exprAnd: exprAnd AND exprEq | exprEq
+// exprAnd: exprEq exprAndAux
+bool exprAnd()
+{
+    Token *start = iTk;
+
+    if (exprEq())
+    {
+        if (exprAndAux())
+        {
+            return true;
+        }
+        else
+            tkerr(iTk, "Invalid expression after == \n");
+    }
+
+    iTk = start;
+    return false;
+}
+
+// exprAndAux: AND exprEq exprAndAux | epsilon
+bool exprAndAux()
+{
+    Token *start = iTk;
+
+    if (consume(AND))
+    {
+        if (exprEq())
+        {
+            if (exprAndAux())
+            {
+                return true;
+            }
+            else
+                tkerr(iTk, "Invalid expression after == \n");
+        }
+        else
+            tkerr(iTk, "Invalid expression after && \n");
+    }
+
+    iTk = start;
+    return true;
+}
+
+// exprEq: exprEq ( EQUAL | NOTEQ ) exprRel | exprRel
+// exprEq: exprRel exprEqAux
+bool exprEq()
+{
+    Token *start = iTk;
+
+    if (exprRel())
+    {
+        if (exprEqAux())
+        {
+            return true;
+        }
+        else
+            tkerr(iTk, "Invalid expression \n");
+    }
+
+    iTk = start;
+    return false;
+}
+
+// exprEqAux: ( EQUAL | NOTEQ ) exprRel exprEqAux
+bool exprEqAux()
+{
+    Token *start = iTk;
+
+    if (consume(EQUAL))
+    {
+        if (exprRel())
+        {
+            if (exprEqAux())
+            {
+                return true;
+            }
+            else
+                tkerr(iTk, "Invalid expression \n");
+        }
+        else
+            tkerr(iTk, "Invalid expression after == \n");
+    }
+    else if (consume(NOTEQ))
+    {
+        if (exprRel())
+        {
+            if (exprEqAux())
+            {
+                return true;
+            }
+            else
+                tkerr(iTk, "Invalid expression \n");
+        }
+        else
+            tkerr(iTk, "Invalid expression after != \n");
+    }
+
+    iTk = start;
+    return true;
+}
+
+// exprRel: exprRel ( LESS | LESSEQ | GREATER | GREATEREQ ) exprAdd | exprAdd
+// exprRel: exprAdd exprRelAux
+bool exprRel()
+{
+    Token *start = iTk;
+
+    if (exprAdd())
+    {
+        if (exprRelAux())
+        {
+            return true;
+        }
+        else
+            tkerr(iTk, "Invalid expression \n");
+    }
+
+    iTk = start;
+    return false;
+}
+
+// exprRelAux: ( LESS | LESSEQ | GREATER | GREATEREQ ) exprAdd exprRelAux | epsilon
+bool exprRelAux()
+{
+    Token *start = iTk;
+
+    if (consume(LESS))
+    {
+        if (exprAdd())
+        {
+            if (exprRelAux())
+            {
+                return true;
+            }
+            else
+                tkerr(iTk, "Invalid expression \n");
+        }
+        else
+            tkerr(iTk, "Invalid expression after < \n");
+    }
+
+    if (consume(LESSEQ))
+    {
+        if (exprAdd())
+        {
+            if (exprRelAux())
+            {
+                return true;
+            }
+            else
+                tkerr(iTk, "Invalid expression \n");
+        }
+        else
+            tkerr(iTk, "Invalid expression after <= \n");
+    }
+
+    if (consume(GREATER))
+    {
+        if (exprAdd())
+        {
+            if (exprRelAux())
+            {
+                return true;
+            }
+            else
+                tkerr(iTk, "Invalid expression \n");
+        }
+        else
+            tkerr(iTk, "Invalid expression after > \n");
+    }
+
+    if (consume(GREATEREQ))
+    {
+        if (exprAdd())
+        {
+            if (exprRelAux())
+            {
+                return true;
+            }
+            else
+                tkerr(iTk, "Invalid expression \n");
+        }
+        else
+            tkerr(iTk, "Invalid expression after >= \n");
+    }
+
+    iTk = start;
+    return true;
+}
+
+// exprAdd: exprAdd ( ADD | SUB ) exprMul | exprMul
+// exprAdd: exprMul exprAddAux
+bool exprAdd()
+{
+    Token *start = iTk;
+
+    if (exprMul())
+    {
+        if (exprAddAux())
+        {
+            return true;
+        }
+        else
+            tkerr(iTk, "Invalid expression \n");
+    }
+
+    iTk = start;
+    return false;
+}
+
+// exprAddAux: ( ADD | SUB ) exprMul exprAddAux | epsilon
+bool exprAddAux()
+{
+    Token *start = iTk;
+
+    if (consume(ADD))
+    {
+        if (exprMul())
+        {
+            if (exprAddAux())
+            {
+                return true;
+            }
+            else
+                tkerr(iTk, "Invalid expression \n");
+        }
+        else
+            tkerr(iTk, "Invalid expression after + \n");
+    }
+    if (consume(SUB))
+    {
+        if (exprMul())
+        {
+            if (exprAddAux())
+            {
+                return true;
+            }
+            else
+                tkerr(iTk, "Invalid expression \n");
+        }
+        else
+            tkerr(iTk, "Invalid expression after - \n");
+    }
+
+    iTk = start;
+    return true;
+}
+
+// exprMul: exprMul ( MUL | DIV ) exprCast | exprCast
+// exprMul: exprCast exprMulAux
+bool exprMul()
+{
+    Token *start = iTk;
+
+    if (exprCast())
+    {
+        if (exprMulAux())
+        {
+            return true;
+        }
+        else
+            tkerr(iTk, "Invalid expression after cast\n");
+    }
+
+    iTk = start;
+    return false;
+}
+
+// exprMulAux: ( MUL | DIV ) exprCast exprMulAux | epsilon
+bool exprMulAux()
+{
+    Token *start = iTk;
+
+    if (consume(MUL))
+    {
+        if (exprCast())
+        {
+            if (exprMulAux())
+            {
+                return true;
+            }
+            else
+                tkerr(iTk, "Invalid expression after cast \n");
+        }
+        else
+            tkerr(iTk, "Invalid expression after * \n");
+    }
+
+    if (consume(DIV))
+    {
+        if (exprCast())
+        {
+            if (exprMulAux())
+            {
+                return true;
+            }
+            else
+                tkerr(iTk, "Invalid expression after cast \n");
+        }
+        else
+            tkerr(iTk, "Invalid expression after / \n");
+    }
+
+    iTk = start;
+    return true;
+}
+
+// exprCast: LPAR typeBase arrayDecl? RPAR exprCast | exprUnary
+bool exprCast()
+{
+    Token *start = iTk;
+
+    if (consume(LPAR))
+    {
+        if (typeBase())
+        {
+            if (arrayDecl())
+            {
+            }
+            if (consume(RPAR))
+            {
+                if (exprCast())
+                {
+                    return true;
+                }
+                else
+                    tkerr(iTk, "Invalid expression after ) in cast expression \n");
+            }
+            else
+                tkerr(iTk, "Missing ) from cast expression \n");
+        }
+    }
+
+    if (exprUnary())
+    {
+        return true;
+    }
+
+    iTk = start;
+    return false;
+}
+
+// exprUnary: ( SUB | NOT ) exprUnary | exprPostfix
+bool exprUnary()
+{
+    Token *start = iTk;
+
+    if (consume(SUB))
+    {
+        if (exprUnary())
+        {
+            return true;
+        }
+        else
+            tkerr(iTk, "Invalid expression after - \n");
+    }
+
+    else if (consume(NOT))
+    {
+        if (exprUnary())
+        {
+            return true;
+        }
+        else
+            tkerr(iTk, "Invalid expression after ! \n");
+    }
+
+    if (exprPostfix())
+    {
+        return true;
+    }
+
+    iTk = start;
+    return false;
+}
+
+// exprPostfix: exprPostfix LBRACKET expr RBRACKET | exprPostfix DOT ID | exprPrimary
+// exprPostfix: exprPrimary exprPostfixAux
+bool exprPostfix()
+{
+    Token *start = iTk;
+
+    if (exprPrimary())
+    {
+        if (exprPostfixAux())
+        {
+            return true;
+        }
+        else
+            tkerr(iTk, "Invalid expression \n");
+    }
+
+    iTk = start;
+    return false;
+}
+
+// exprPostfixAux: LBRACKET expr RBRACKET exprPostfixAux | DOT ID exprPostfixAux | epsilon
+bool exprPostfixAux()
+{
+    Token *start = iTk;
+
+    if (consume(LBRACKET))
+    {
+        if (expr())
+        {
+            if (consume(RBRACKET))
+            {
+                if (exprPostfixAux())
+                {
+                    return true;
+                }
+                else
+                    tkerr(iTk, "Invalid expression after ] \n");
+            }
+            else
+                tkerr(iTk, "Missing ] after expression\n");
+        }
+        else
+            tkerr(iTk, "Invalid expression after [ \n");
+    }
+
+    else if (consume(DOT))
+    {
+        if (consume(ID))
+        {
+            if (exprPostfixAux())
+            {
+                return true;
+            }
+            else
+                tkerr(iTk, "Invalid expression after ID \n");
+        }
+        else
+            tkerr(iTk, "Invalid expression after . \n");
+    }
+
+    iTk = start;
+    return true;
+}
+
+// exprPrimary: ID ( LPAR ( expr ( COMMA expr )* )? RPAR )? | CT_INT | CT_REAL | CT_CHAR | CT_STRING | LPAR expr RPAR
+bool exprPrimary()
+{
+    Token *start = iTk;
+
+    if (consume(ID))
+    {
+        if (consume(LPAR))
+        {
+            if (expr())
+            {
+                for (;;)
+                {
+                    if (consume(COMMA))
+                    {
+                        if (expr())
+                        {
+                        }
+                        else
+                            tkerr(iTk, "Missing expression after , \n");
+                    }
+                    else
+                        break;
+                }
+            }
+            if (consume(RPAR))
+            {
+                return true;
+            }
+            else
+                tkerr(iTk, "Missing ) after expression \n");
+        }
+
+        return true;
+    }
+
+    if (consume(CT_INT))
+    {
+        return true;
+    }
+
+    if (consume(CT_REAL))
+    {
+        return true;
+    }
+
+    if (consume(CT_CHAR))
+    {
+        return true;
+    }
+
+    if (consume(CT_STRING))
+    {
+        return true;
+    }
+
+    if (consume(LPAR))
+    {
+        if (expr())
+        {
+            if (consume(RPAR))
+            {
+                return true;
+            }
+            else
+                tkerr(iTk, "Missing ) after expression \n");
+        }
+        else
+            tkerr(iTk, "Missing expression after (");
+    }
+
+    iTk = start;
+    return false;
+}
+
+int main(int argc, char const *argv[])
+{
+    readFile(argv[1]);
+    pCrtCh = inBuffer;
+    while (getNextToken() != END)
+    {
+    }
+
+    iTk = tokens;
+    unit();
+    return 0;
 }
