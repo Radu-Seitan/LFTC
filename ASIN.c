@@ -44,8 +44,8 @@ bool consume(int code)
     {
         consumedTk = iTk;
         iTk = iTk->next;
-        printToken(code);
-        printf("\n");
+        // printToken(code);
+        // printf("\n");
         return true;
     }
     return false;
@@ -377,7 +377,7 @@ bool stm()
                     tkerr(iTk, "Missing second ; from the for condition\n");
             }
             else
-                tkerr(iTk, "Missing second ; from the for condition\n");
+                tkerr(iTk, "Missing first ; from the for condition\n");
         }
         else
             tkerr(iTk, "Missing ( after the for instruction\n");
@@ -1066,6 +1066,9 @@ int main(int argc, char const *argv[])
     }
 
     iTk = tokens;
-    unit();
+    if (unit())
+    {
+        printf("Syntax is good\n");
+    }
     return 0;
 }
