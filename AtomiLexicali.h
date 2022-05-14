@@ -1,3 +1,10 @@
+#define SAFEALLOC(var, Type)                          \
+    if ((var = (Type *)malloc(sizeof(Type))) == NULL) \
+        err("not enough memory ");
+
+#define SAFEALLOCN(var, Type, n)                            \
+    if ((var = (Type *)malloc(sizeof(Type) * (n))) == NULL) \
+        err("not enough memory ");
 enum
 {
     ID,

@@ -3,13 +3,6 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include "AtomiLexicali.h"
-#define SAFEALLOC(var, Type)                          \
-    if ((var = (Type *)malloc(sizeof(Type))) == NULL) \
-        err("not enough memory ");
-
-#define SAFEALLOCN(var, Type, n)                            \
-    if ((var = (Type *)malloc(sizeof(Type) * (n))) == NULL) \
-        err("not enough memory ");
 
 Token *tokens = NULL;
 Token *lastToken = NULL;

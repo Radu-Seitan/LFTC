@@ -1,13 +1,28 @@
-// program de testare a analizorului lexical, v1.1
+int x;
+char y;
+double z;
+double p[100];
 
-int main()
-{
+struct S1{
 	int i;
-	for(i=0;i<10;i=i+1){
-		if (i/2==1)puti(i);
+	double d[2];
+	char x;
+	};
+struct S1 p1;
+struct S1 vp[10];
+
+double sum(double x[5],int n){
+	double r;
+	int i;
+	r=0;
+	for(i=0;i<n;i=i+1){
+		double n;
+		n=x[i];
+		r=r+n;		
 		}
-	if(4.9==49e-1&&0.49E1==2.45*2.0)puts("yes");
-	putc('#');
-	puts("");	// pentru \n
-	return 0;
-}
+	return r;
+	}
+	
+void f(struct S1 p){
+	puti(p.i);
+	}
