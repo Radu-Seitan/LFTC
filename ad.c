@@ -53,7 +53,7 @@ void freeSymbols(Symbol *list)
 Symbol *newSymbol(const char *name, SymKind kind)
 {
     Symbol *s;
-    SAFEALLOC(s, Symbol);
+    SAFEALLOC(s, Symbol)
     // seteaza pe 0/NULL toate campurile
     memset(s, 0, sizeof(Symbol));
     s->name = name;
@@ -64,7 +64,7 @@ Symbol *newSymbol(const char *name, SymKind kind)
 Symbol *dupSymbol(Symbol *symbol)
 {
     Symbol *s;
-    SAFEALLOC(s, Symbol);
+    SAFEALLOC(s, Symbol)
     *s = *symbol;
     s->next = NULL;
     return s;
@@ -114,7 +114,7 @@ void freeSymbol(Symbol *s)
 Domain *pushDomain()
 {
     Domain *d;
-    SAFEALLOC(d, Domain);
+    SAFEALLOC(d, Domain)
     d->symbols = NULL;
     d->parent = symTable;
     symTable = d;
@@ -249,4 +249,22 @@ int allocInGlobalMemory(int nBytes)
     int idx = nGlobalMemory;
     nGlobalMemory += nBytes;
     return idx;
+}
+
+Symbol *addExtFn(const char *name, void (*extFnPtr)(), Type ret)
+{
+    Symbol *fn = newSymbol(name, SK_FN);
+    fn->fn.extFnPtr = extFnPtr;
+    fn->type = ret;
+    addSymbolToDomain(symTable, fn);
+    return fn;
+}
+
+Symbol *addFnParam(Symbol *fn, const char *name, Type type)
+{
+    Symbol *param = newSymbol(name, SK_PARAM);
+    param->type = type;
+    param->paramIdx = symbolsLen(fn->fn.params);
+    addSymbolToList(&fn->fn.params, dupSymbol(param));
+    return param;
 }

@@ -3,8 +3,8 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <stdbool.h>
-#include "ad.c"
 #include "at.c"
+#include "mv.c"
 
 Token *iTk;
 Token *consumedTk;
@@ -1366,12 +1366,16 @@ int main(int argc, char const *argv[])
     }
 
     pushDomain();
+    mvInit();
     iTk = tokens;
     if (unit())
     {
         printf("Syntax check has completed successfully\n");
     }
-    //showDomain(symTable, "global");
+    // showDomain(symTable, "global");
+    // genTestProgram();
+    genTestFloat();
+    run();
     dropDomain();
     return 0;
 }
