@@ -4,7 +4,7 @@
 #include <stdarg.h>
 #include <stdbool.h>
 #include "at.c"
-#include "mv.c"
+#include "gc.c"
 
 Token *iTk;
 Token *consumedTk;
@@ -58,6 +58,10 @@ bool consume(int code)
 bool unit()
 {
     Token *start = iTk;
+    int startInstr = nInstructions;
+
+    addInstr(OP_CALL);
+    addInstr(OP_HALT);
 
     for (;;)
     {
@@ -75,11 +79,16 @@ bool unit()
     }
     if (consume(END))
     {
+        Symbol *sm = findSymbol("main");
+        if (!sm)
+            tkerr(iTk, "undefined: main");
+        instructions[0].arg.i = sm->fn.instrIdx;
         return true;
     }
 
     tkerr(iTk, "Syntax error\n");
     iTk = start;
+    nInstructions = startInstr;
     return false;
 }
 
@@ -87,6 +96,7 @@ bool unit()
 bool structDef()
 {
     Token *start = iTk;
+    int startInstr = nInstructions;
 
     if (consume(STRUCT))
     {
@@ -132,6 +142,7 @@ bool structDef()
     }
 
     iTk = start;
+    nInstructions = startInstr;
     return false;
 }
 
@@ -140,6 +151,8 @@ bool varDef()
 {
     Token *start = iTk;
     Type t;
+    int startInstr = nInstructions;
+
     if (typeBase(&t))
     {
         if (consume(ID))
@@ -187,6 +200,7 @@ bool varDef()
     }
 
     iTk = start;
+    nInstructions = startInstr;
     return false;
 }
 
@@ -195,6 +209,7 @@ bool typeBase(Type *t)
 {
     Token *start = iTk;
     t->n = -1;
+    int startInstr = nInstructions;
 
     if (consume(INT))
     {
@@ -227,6 +242,7 @@ bool typeBase(Type *t)
     }
 
     iTk = start;
+    nInstructions = startInstr;
     return false;
 }
 
@@ -234,6 +250,7 @@ bool typeBase(Type *t)
 bool arrayDecl(Type *t)
 {
     Token *start = iTk;
+    int startInstr = nInstructions;
 
     if (consume(LBRACKET))
     {
@@ -255,6 +272,7 @@ bool arrayDecl(Type *t)
     }
 
     iTk = start;
+    nInstructions = startInstr;
     return false;
 }
 
@@ -263,6 +281,7 @@ bool fnDef()
 {
     Token *start = iTk;
     Type t;
+    int startInstr = nInstructions;
 
     if (typeBase(&t))
     {
@@ -298,10 +317,15 @@ bool fnDef()
                 }
                 if (consume(RPAR))
                 {
+                    owner->fn.instrIdx = nInstructions;
+                    addInstr(OP_ENTER);
                     if (stmCompound(false))
                     {
-                        dropDomain();
+                        instructions[owner->fn.instrIdx].arg.i = symbolsLen(owner->fn.locals);
+                        if (owner->type.tb == TB_VOID)
+                            addInstrWithInt(OP_RET_VOID, symbolsLen(owner->fn.params));
                         owner = NULL;
+                        dropDomain();
                         return true;
                     }
                     else
@@ -350,10 +374,15 @@ bool fnDef()
                 }
                 if (consume(RPAR))
                 {
+                    owner->fn.instrIdx = nInstructions;
+                    addInstr(OP_ENTER);
                     if (stmCompound(false))
                     {
-                        dropDomain();
+                        instructions[owner->fn.instrIdx].arg.i = symbolsLen(owner->fn.locals);
+                        if (owner->type.tb == TB_VOID)
+                            addInstrWithInt(OP_RET_VOID, symbolsLen(owner->fn.params));
                         owner = NULL;
+                        dropDomain();
                         return true;
                     }
                     else
@@ -368,6 +397,7 @@ bool fnDef()
     }
 
     iTk = start;
+    nInstructions = startInstr;
     return false;
 }
 
@@ -376,6 +406,7 @@ bool fnParam()
 {
     Type t;
     Token *start = iTk;
+    int startInstr = nInstructions;
 
     if (typeBase(&t))
     {
@@ -391,6 +422,7 @@ bool fnParam()
                 tkerr(iTk, "symbol redefinition: %s", tkName->text);
             param = newSymbol(tkName->text, SK_PARAM);
             param->type = t;
+            param->owner = owner;
             param->paramIdx = symbolsLen(owner->fn.params);
 
             // parametrul este adaugat atat la domeniul curent, cat si la parametrii fn
@@ -403,6 +435,7 @@ bool fnParam()
     }
 
     iTk = start;
+    nInstructions = startInstr;
     return false;
 }
 
@@ -418,6 +451,7 @@ bool stm()
 {
     Token *start = iTk;
     Ret rInit, rCond, rStep, rExpr;
+    int startInstr = nInstructions;
 
     if (stmCompound(true))
     {
@@ -434,17 +468,26 @@ bool stm()
                     tkerr(iTk, "The if condition must be a scalar value");
                 if (consume(RPAR))
                 {
+                    addRVal(rCond.lval, &rCond.type);
+                    Type intType = {TB_INT, NULL, -1};
+                    insertConvIfNeeded(nInstructions, &rCond.type, &intType);
+                    int posJF = addInstr(OP_JF);
                     if (stm())
                     {
                         if (consume(ELSE))
                         {
+                            int posJMP = addInstr(OP_JMP);
+                            instructions[posJF].arg.i = nInstructions;
                             if (stm())
                             {
+                                instructions[posJMP].arg.i = nInstructions;
                                 return true;
                             }
                             else
                                 tkerr(iTk, "The else instruction cannot have an empty body\n");
                         }
+
+                        instructions[posJF].arg.i = nInstructions;
                         return true;
                     }
                     else
@@ -462,6 +505,7 @@ bool stm()
 
     if (consume(WHILE))
     {
+        int posCond = nInstructions;
         if (consume(LPAR))
         {
             if (expr(&rCond))
@@ -470,8 +514,14 @@ bool stm()
                     tkerr(iTk, "The while condition must be a scalar value");
                 if (consume(RPAR))
                 {
+                    addRVal(rCond.lval, &rCond.type);
+                    Type intType = {TB_INT, NULL, -1};
+                    insertConvIfNeeded(nInstructions, &rCond.type, &intType);
+                    int posJF = addInstr(OP_JF);
                     if (stm())
                     {
+                        addInstrWithInt(OP_JMP, posCond);
+                        instructions[posJF].arg.i = nInstructions;
                         return true;
                     }
                     else
@@ -546,11 +596,15 @@ bool stm()
                 tkerr(iTk, "The return value must be a scalar value");
             if (!convTo(&rExpr.type, &owner->type))
                 tkerr(iTk, "Cannot convert the return expression type to the function return type");
+            addRVal(rExpr.lval, &rExpr.type);
+            insertConvIfNeeded(nInstructions, &rExpr.type, &owner->type);
+            addInstrWithInt(OP_RET, symbolsLen(owner->fn.params));
         }
         else
         {
             if (owner->type.tb != TB_VOID)
                 tkerr(iTk, "a non-void function must return a value");
+            addInstr(OP_RET_VOID);
         }
         if (consume(SEMICOLON))
         {
@@ -562,6 +616,8 @@ bool stm()
 
     if (expr(&rExpr))
     {
+        if (rExpr.type.tb != TB_VOID)
+            addInstr(OP_DROP);
         if (consume(SEMICOLON))
         {
             return true;
@@ -576,6 +632,7 @@ bool stm()
     }
 
     iTk = start;
+    nInstructions = startInstr;
     return false;
 }
 
@@ -583,6 +640,7 @@ bool stm()
 bool stmCompound(bool newDomain)
 {
     Token *start = iTk;
+    int startInstr = nInstructions;
 
     if (consume(LACC))
     {
@@ -610,6 +668,7 @@ bool stmCompound(bool newDomain)
     }
 
     iTk = start;
+    nInstructions = startInstr;
     return false;
 }
 
@@ -617,6 +676,7 @@ bool stmCompound(bool newDomain)
 bool expr(Ret *r)
 {
     Token *start = iTk;
+    int startInstr = nInstructions;
 
     if (exprAssign(r))
     {
@@ -624,6 +684,7 @@ bool expr(Ret *r)
     }
 
     iTk = start;
+    nInstructions = startInstr;
     return false;
 }
 
@@ -632,6 +693,7 @@ bool exprAssign(Ret *r)
 {
     Token *start = iTk;
     Ret rDst;
+    int startInstr = nInstructions;
 
     if (exprUnary(&rDst))
     {
@@ -651,6 +713,17 @@ bool exprAssign(Ret *r)
                     tkerr(iTk, "The assign source cannot be converted to destination");
                 r->lval = false;
                 r->ct = true;
+                addRVal(r->lval, &r->type);
+                insertConvIfNeeded(nInstructions, &r->type, &rDst.type);
+                switch (rDst.type.tb)
+                {
+                case TB_INT:
+                    addInstr(OP_STORE_I);
+                    break;
+                case TB_DOUBLE:
+                    addInstr(OP_STORE_F);
+                    break;
+                }
                 return true;
             }
             else
@@ -659,12 +732,14 @@ bool exprAssign(Ret *r)
     }
 
     iTk = start;
+    nInstructions = startInstr;
     if (exprOr(r))
     {
         return true;
     }
 
     iTk = start;
+    nInstructions = startInstr;
     return false;
 }
 
@@ -673,6 +748,7 @@ bool exprAssign(Ret *r)
 bool exprOr(Ret *r)
 {
     Token *start = iTk;
+    int startInstr = nInstructions;
 
     if (exprAnd(r))
     {
@@ -685,6 +761,7 @@ bool exprOr(Ret *r)
     }
 
     iTk = start;
+    nInstructions = startInstr;
     return false;
 }
 
@@ -722,6 +799,7 @@ bool exprOrAux(Ret *r)
 bool exprAnd(Ret *r)
 {
     Token *start = iTk;
+    int startInstr = nInstructions;
 
     if (exprEq(r))
     {
@@ -734,6 +812,7 @@ bool exprAnd(Ret *r)
     }
 
     iTk = start;
+    nInstructions = startInstr;
     return false;
 }
 
@@ -771,6 +850,7 @@ bool exprAndAux(Ret *r)
 bool exprEq(Ret *r)
 {
     Token *start = iTk;
+    int startInstr = nInstructions;
 
     if (exprRel(r))
     {
@@ -783,6 +863,7 @@ bool exprEq(Ret *r)
     }
 
     iTk = start;
+    nInstructions = startInstr;
     return false;
 }
 
@@ -839,6 +920,7 @@ bool exprEqAux(Ret *r)
 bool exprRel(Ret *r)
 {
     Token *start = iTk;
+    int startInstr = nInstructions;
 
     if (exprAdd(r))
     {
@@ -851,6 +933,7 @@ bool exprRel(Ret *r)
     }
 
     iTk = start;
+    nInstructions = startInstr;
     return false;
 }
 
@@ -858,16 +941,37 @@ bool exprRel(Ret *r)
 bool exprRelAux(Ret *r)
 {
     Token *start = iTk;
+    Token *op;
 
     if (consume(LESS))
     {
         Ret right;
+        op = consumedTk;
+        int posLeft = nInstructions;
+        addRVal(r->lval, &r->type);
 
         if (exprAdd(&right))
         {
             Type tDst;
             if (!arithTypeTo(&r->type, &right.type, &tDst))
                 tkerr(iTk, "Invalid operand type for <");
+            addRVal(right.lval, &right.type);
+            insertConvIfNeeded(posLeft, &r->type, &tDst);
+            insertConvIfNeeded(nInstructions, &right.type, &tDst);
+            switch (op->code)
+            {
+            case LESS:
+                switch (tDst.tb)
+                {
+                case TB_INT:
+                    addInstr(OP_LESS_I);
+                    break;
+                case TB_DOUBLE:
+                    addInstr(OP_LESS_F);
+                    break;
+                }
+                break;
+            }
             *r = (Ret){{TB_INT, NULL, -1}, false, true};
             if (exprRelAux(r))
             {
@@ -883,12 +987,32 @@ bool exprRelAux(Ret *r)
     if (consume(LESSEQ))
     {
         Ret right;
+        op = consumedTk;
+        int posLeft = nInstructions;
+        addRVal(r->lval, &r->type);
 
         if (exprAdd(&right))
         {
             Type tDst;
             if (!arithTypeTo(&r->type, &right.type, &tDst))
                 tkerr(iTk, "Invalid operand type for <=");
+            addRVal(right.lval, &right.type);
+            insertConvIfNeeded(posLeft, &r->type, &tDst);
+            insertConvIfNeeded(nInstructions, &right.type, &tDst);
+            switch (op->code)
+            {
+            case LESS:
+                switch (tDst.tb)
+                {
+                case TB_INT:
+                    addInstr(OP_LESS_I);
+                    break;
+                case TB_DOUBLE:
+                    addInstr(OP_LESS_F);
+                    break;
+                }
+                break;
+            }
             *r = (Ret){{TB_INT, NULL, -1}, false, true};
             if (exprRelAux(r))
             {
@@ -904,11 +1028,32 @@ bool exprRelAux(Ret *r)
     if (consume(GREATER))
     {
         Ret right;
+        op = consumedTk;
+        int posLeft = nInstructions;
+        addRVal(r->lval, &r->type);
+
         if (exprAdd(&right))
         {
             Type tDst;
             if (!arithTypeTo(&r->type, &right.type, &tDst))
                 tkerr(iTk, "Invalid operand type for >");
+            addRVal(right.lval, &right.type);
+            insertConvIfNeeded(posLeft, &r->type, &tDst);
+            insertConvIfNeeded(nInstructions, &right.type, &tDst);
+            switch (op->code)
+            {
+            case LESS:
+                switch (tDst.tb)
+                {
+                case TB_INT:
+                    addInstr(OP_LESS_I);
+                    break;
+                case TB_DOUBLE:
+                    addInstr(OP_LESS_F);
+                    break;
+                }
+                break;
+            }
             *r = (Ret){{TB_INT, NULL, -1}, false, true};
             if (exprRelAux(r))
             {
@@ -924,12 +1069,32 @@ bool exprRelAux(Ret *r)
     if (consume(GREATEREQ))
     {
         Ret right;
+        op = consumedTk;
+        int posLeft = nInstructions;
+        addRVal(r->lval, &r->type);
 
         if (exprAdd(&right))
         {
             Type tDst;
             if (!arithTypeTo(&r->type, &right.type, &tDst))
                 tkerr(iTk, "Invalid operand type for >=");
+            addRVal(right.lval, &right.type);
+            insertConvIfNeeded(posLeft, &r->type, &tDst);
+            insertConvIfNeeded(nInstructions, &right.type, &tDst);
+            switch (op->code)
+            {
+            case LESS:
+                switch (tDst.tb)
+                {
+                case TB_INT:
+                    addInstr(OP_LESS_I);
+                    break;
+                case TB_DOUBLE:
+                    addInstr(OP_LESS_F);
+                    break;
+                }
+                break;
+            }
             *r = (Ret){{TB_INT, NULL, -1}, false, true};
             if (exprRelAux(r))
             {
@@ -951,6 +1116,7 @@ bool exprRelAux(Ret *r)
 bool exprAdd(Ret *r)
 {
     Token *start = iTk;
+    int startInstr = nInstructions;
 
     if (exprMul(r))
     {
@@ -963,6 +1129,7 @@ bool exprAdd(Ret *r)
     }
 
     iTk = start;
+    nInstructions = startInstr;
     return false;
 }
 
@@ -970,15 +1137,48 @@ bool exprAdd(Ret *r)
 bool exprAddAux(Ret *r)
 {
     Token *start = iTk;
+    Token *op;
 
     if (consume(ADD))
     {
         Ret right;
+        op = consumedTk;
+        int posLeft = nInstructions;
+        addRVal(r->lval, &r->type);
+
         if (exprMul(&right))
         {
             Type tDst;
             if (!arithTypeTo(&r->type, &right.type, &tDst))
                 tkerr(iTk, "Invalid operand type for +");
+            addRVal(right.lval, &right.type);
+            insertConvIfNeeded(posLeft, &r->type, &tDst);
+            insertConvIfNeeded(nInstructions, &right.type, &tDst);
+            switch (op->code)
+            {
+            case ADD:
+                switch (tDst.tb)
+                {
+                case TB_INT:
+                    addInstr(OP_ADD_I);
+                    break;
+                case TB_DOUBLE:
+                    addInstr(OP_ADD_F);
+                    break;
+                }
+                break;
+            case SUB:
+                switch (tDst.tb)
+                {
+                case TB_INT:
+                    addInstr(OP_SUB_I);
+                    break;
+                case TB_DOUBLE:
+                    addInstr(OP_SUB_F);
+                    break;
+                }
+                break;
+            }
             *r = (Ret){tDst, false, true};
             if (exprAddAux(r))
             {
@@ -993,11 +1193,43 @@ bool exprAddAux(Ret *r)
     if (consume(SUB))
     {
         Ret right;
+        op = consumedTk;
+        int posLeft = nInstructions;
+        addRVal(r->lval, &r->type);
+
         if (exprMul(&right))
         {
             Type tDst;
             if (!arithTypeTo(&r->type, &right.type, &tDst))
                 tkerr(iTk, "Invalid operand type for -");
+            addRVal(right.lval, &right.type);
+            insertConvIfNeeded(posLeft, &r->type, &tDst);
+            insertConvIfNeeded(nInstructions, &right.type, &tDst);
+            switch (op->code)
+            {
+            case ADD:
+                switch (tDst.tb)
+                {
+                case TB_INT:
+                    addInstr(OP_ADD_I);
+                    break;
+                case TB_DOUBLE:
+                    addInstr(OP_ADD_F);
+                    break;
+                }
+                break;
+            case SUB:
+                switch (tDst.tb)
+                {
+                case TB_INT:
+                    addInstr(OP_SUB_I);
+                    break;
+                case TB_DOUBLE:
+                    addInstr(OP_SUB_F);
+                    break;
+                }
+                break;
+            }
             *r = (Ret){tDst, false, true};
             if (exprAddAux(r))
             {
@@ -1019,6 +1251,7 @@ bool exprAddAux(Ret *r)
 bool exprMul(Ret *r)
 {
     Token *start = iTk;
+    int startInstr = nInstructions;
 
     if (exprCast(r))
     {
@@ -1031,6 +1264,7 @@ bool exprMul(Ret *r)
     }
 
     iTk = start;
+    nInstructions = startInstr;
     return false;
 }
 
@@ -1038,16 +1272,48 @@ bool exprMul(Ret *r)
 bool exprMulAux(Ret *r)
 {
     Token *start = iTk;
+    Token *op;
 
     if (consume(MUL))
     {
         Ret right;
+        op = consumedTk;
+        int posLeft = nInstructions;
+        addRVal(r->lval, &r->type);
 
         if (exprCast(&right))
         {
             Type tDst;
             if (!arithTypeTo(&r->type, &right.type, &tDst))
                 tkerr(iTk, "Invalid operand type for *");
+            addRVal(right.lval, &right.type);
+            insertConvIfNeeded(posLeft, &r->type, &tDst);
+            insertConvIfNeeded(nInstructions, &right.type, &tDst);
+            switch (op->code)
+            {
+            case MUL:
+                switch (tDst.tb)
+                {
+                case TB_INT:
+                    addInstr(OP_MUL_I);
+                    break;
+                case TB_DOUBLE:
+                    addInstr(OP_MUL_F);
+                    break;
+                }
+                break;
+            case DIV:
+                switch (tDst.tb)
+                {
+                case TB_INT:
+                    addInstr(OP_DIV_I);
+                    break;
+                case TB_DOUBLE:
+                    addInstr(OP_DIV_F);
+                    break;
+                }
+                break;
+            }
             *r = (Ret){tDst, false, true};
             if (exprMulAux(r))
             {
@@ -1063,12 +1329,43 @@ bool exprMulAux(Ret *r)
     if (consume(DIV))
     {
         Ret right;
+        op = consumedTk;
+        int posLeft = nInstructions;
+        addRVal(r->lval, &r->type);
 
         if (exprCast(&right))
         {
             Type tDst;
             if (!arithTypeTo(&r->type, &right.type, &tDst))
                 tkerr(iTk, "Invalid operand type for * or /");
+            addRVal(right.lval, &right.type);
+            insertConvIfNeeded(posLeft, &r->type, &tDst);
+            insertConvIfNeeded(nInstructions, &right.type, &tDst);
+            switch (op->code)
+            {
+            case MUL:
+                switch (tDst.tb)
+                {
+                case TB_INT:
+                    addInstr(OP_MUL_I);
+                    break;
+                case TB_DOUBLE:
+                    addInstr(OP_MUL_F);
+                    break;
+                }
+                break;
+            case DIV:
+                switch (tDst.tb)
+                {
+                case TB_INT:
+                    addInstr(OP_DIV_I);
+                    break;
+                case TB_DOUBLE:
+                    addInstr(OP_DIV_F);
+                    break;
+                }
+                break;
+            }
             *r = (Ret){tDst, false, true};
             if (exprMulAux(r))
             {
@@ -1089,6 +1386,7 @@ bool exprMulAux(Ret *r)
 bool exprCast(Ret *r)
 {
     Token *start = iTk;
+    int startInstr = nInstructions;
 
     if (consume(LPAR))
     {
@@ -1129,6 +1427,7 @@ bool exprCast(Ret *r)
     }
 
     iTk = start;
+    nInstructions = startInstr;
     return false;
 }
 
@@ -1136,6 +1435,7 @@ bool exprCast(Ret *r)
 bool exprUnary(Ret *r)
 {
     Token *start = iTk;
+    int startInstr = nInstructions;
 
     if (consume(SUB))
     {
@@ -1171,6 +1471,7 @@ bool exprUnary(Ret *r)
     }
 
     iTk = start;
+    nInstructions = startInstr;
     return false;
 }
 
@@ -1179,6 +1480,7 @@ bool exprUnary(Ret *r)
 bool exprPostfix(Ret *r)
 {
     Token *start = iTk;
+    int startInstr = nInstructions;
 
     if (exprPrimary(r))
     {
@@ -1191,6 +1493,7 @@ bool exprPostfix(Ret *r)
     }
 
     iTk = start;
+    nInstructions = startInstr;
     return false;
 }
 
@@ -1258,6 +1561,7 @@ bool exprPostfixAux(Ret *r)
 bool exprPrimary(Ret *r)
 {
     Token *start = iTk;
+    int startInstr = nInstructions;
 
     if (consume(ID))
     {
@@ -1277,6 +1581,8 @@ bool exprPrimary(Ret *r)
                     tkerr(iTk, "Too many arguments in function call");
                 if (!convTo(&rArg.type, &param->type))
                     tkerr(iTk, "In call, cannot convert the argument type to the parameter type");
+                addRVal(rArg.lval, &rArg.type);
+                insertConvIfNeeded(nInstructions, &rArg.type, &param->type);
                 param = param->next;
                 for (;;)
                 {
@@ -1288,6 +1594,8 @@ bool exprPrimary(Ret *r)
                                 tkerr(iTk, "Too many arguments in function call");
                             if (!convTo(&rArg.type, &param->type))
                                 tkerr(iTk, "In call, cannot convert the argument type to the parameter type");
+                            addRVal(rArg.lval, &rArg.type);
+                            insertConvIfNeeded(nInstructions, &rArg.type, &param->type);
                             param = param->next;
                         }
                         else
@@ -1302,6 +1610,15 @@ bool exprPrimary(Ret *r)
                 if (param)
                     tkerr(iTk, "too few arguments in function call");
                 *r = (Ret){s->type, false, true};
+                if (s->fn.extFnPtr)
+                {
+                    int posCallExt = addInstr(OP_CALL_EXT);
+                    instructions[posCallExt].arg.extFnPtr = s->fn.extFnPtr;
+                }
+                else
+                {
+                    addInstrWithInt(OP_CALL, s->fn.instrIdx);
+                }
                 return true;
             }
             else
@@ -1311,17 +1628,50 @@ bool exprPrimary(Ret *r)
         if (s->kind == SK_FN)
             tkerr(iTk, "A function can only be called");
         *r = (Ret){s->type, true, s->type.n >= 0};
+        if (s->kind == SK_VAR)
+        {
+            if (s->owner == NULL)
+            { // variabile globale
+                addInstrWithInt(OP_ADDR, s->varIdx);
+            }
+            else
+            { // variabile locale
+                switch (s->type.tb)
+                {
+                case TB_INT:
+                    addInstrWithInt(OP_FPADDR_I, s->varIdx + 1);
+                    break;
+                case TB_DOUBLE:
+                    addInstrWithInt(OP_FPADDR_F, s->varIdx + 1);
+                    break;
+                }
+            }
+        }
+        if (s->kind == SK_PARAM)
+        {
+            switch (s->type.tb)
+            {
+            case TB_INT:
+                addInstrWithInt(OP_FPADDR_I, s->paramIdx - symbolsLen(s->owner->fn.params) - 1);
+                break;
+            case TB_DOUBLE:
+                addInstrWithInt(OP_FPADDR_F, s->paramIdx - symbolsLen(s->owner->fn.params) - 1);
+                break;
+            }
+        }
         return true;
     }
 
     if (consume(CT_INT))
     {
+        addInstrWithInt(OP_PUSH_I, consumedTk->i);
         *r = (Ret){{TB_INT, NULL, -1}, false, true};
         return true;
     }
 
     if (consume(CT_REAL))
     {
+        addInstrWithDouble(OP_PUSH_F, consumedTk->r);
         *r = (Ret){{TB_DOUBLE, NULL, -1}, false, true};
         return true;
     }
@@ -1354,6 +1704,7 @@ bool exprPrimary(Ret *r)
     }
 
     iTk = start;
+    nInstructions = startInstr;
     return false;
 }
 
@@ -1374,7 +1725,7 @@ int main(int argc, char const *argv[])
     }
     // showDomain(symTable, "global");
     // genTestProgram();
-    genTestFloat();
+    // genTestFloat();
     run();
     dropDomain();
     return 0;

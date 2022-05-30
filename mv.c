@@ -16,6 +16,19 @@ int addInstr(int op)
     return nInstructions++;
 }
 
+int insertInstr(int pos, int op)
+{
+    Instr *p = (Instr *)realloc(instructions, (nInstructions + 1) * sizeof(Instr));
+    if (!p)
+        err("not enough memory");
+    instructions = p;
+    Instr *i = instructions + pos;
+    memmove(i + 1, i, (nInstructions - pos) * sizeof(Instr));
+    i->op = op;
+    nInstructions++;
+    return pos;
+}
+
 int addInstrWithInt(int op, int i)
 {
     int pos = addInstr(op);
@@ -101,6 +114,7 @@ void put_d()
 
 void mvInit()
 {
+
     Symbol *fn = addExtFn("put_i", put_i, (Type){TB_VOID, NULL, -1});
     addFnParam(fn, "i", (Type){TB_INT, NULL, -1});
 
@@ -116,6 +130,7 @@ void run()
     Val v;
     int iArg, iTop, iBefore;
     double dArg, dTop, dBefore;
+    void *pTop;
     void (*extFnPtr)();
     for (;;)
     {
@@ -192,6 +207,7 @@ void run()
             printf("LESS.i\t// %d<%d -> %d", iBefore, iTop, iBefore < iTop);
             IP++;
             break;
+        // adaugate pt mv
         case OP_PUSH_F:
             printf("PUSH.f\t%g", IP->arg.f);
             pushf(IP->arg.f);
@@ -209,6 +225,61 @@ void run()
             dBefore = popf();
             pushf(dTop + dBefore);
             printf("ADD.f\t// %lg+%lg -> %lg", dBefore, dTop, dBefore + dTop);
+            IP++;
+            break;
+        // instructiuni adaugate pentru generarea de cod
+        case OP_RET:
+            v = popv();
+            iArg = IP->arg.i;
+            printf("RET\t%d\t// i:%d, f:%g", iArg, v.i, v.f);
+            IP = FP[-1].p;
+            SP = FP - iArg - 2;
+            FP = FP[0].p;
+            pushv(v);
+            break;
+        case OP_CONV_F_I:
+            dTop = popf();
+            pushi((int)dTop);
+            printf("CONV.f.i\t// %g -> %d", dTop, (int)dTop);
+            IP++;
+            break;
+        case OP_LOAD_I:
+            pTop = popp();
+            pushi(*(int *)pTop);
+            printf("LOAD.i\t// *(int*)%p -> %d", pTop, *(int *)pTop);
+            IP++;
+            break;
+        case OP_STORE_I:
+            iTop = popi();
+            v = popv();
+            *(int *)v.p = iTop;
+            pushi(iTop);
+            printf("STORE.i\t//*(int*)%p=%d", v.p, iTop);
+            IP++;
+            break;
+        case OP_FPADDR_I:
+            pTop = &FP[IP->arg.i].i;
+            pushp(pTop);
+            printf("FPADDR\t%d\t// %p", IP->arg.i, pTop);
+            IP++;
+            break;
+        case OP_SUB_I:
+            iTop = popi();
+            iBefore = popi();
+            pushi(iBefore - iTop);
+            printf("SUB.i\t// %d-%d -> %d", iBefore, iTop, iBefore - iTop);
+            IP++;
+            break;
+        case OP_MUL_I:
+            iTop = popi();
+            iBefore = popi();
+            pushi(iBefore * iTop);
+            printf("MUL.i\t// %d*%d -> %d", iBefore, iTop, iBefore * iTop);
+            IP++;
+            break;
+        case OP_DROP:
+            popv();
+            printf("DROP");
             IP++;
             break;
         default:
